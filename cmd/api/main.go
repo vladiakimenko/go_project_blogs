@@ -3,21 +3,42 @@ package main
 import (
 	"log"
 	"net/http"
-	"os"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
+
+	"blog-api/pkg/auth"
+	"blog-api/pkg/settings"
 )
 
+// func loadConfig() *Config {
+// 	return &Config{
+// 		ServerHost:            getEnv[string]("HOST", "localhost"),
+// 		ServerPort:            getEnv[int]("PORT", 8000),
+
+// 		DBHost:                getEnv[string]("POSTGRES_HOST", "localhost"),
+// 		DBPort:                getEnv[int]("POSTGRES_PORT", 5432),
+// 		DBUser:                getEnv[string]("POSTGRES_USER", noDefault),
+// 		DBPassword:            getEnv[string]("POSTGRES_PASSWORD", noDefault),
+// 		DBName:                getEnv[string]("POSTGRES_DB", noDefault),
+// 		DBSSLMode:             getEnv[bool]("POSTGRES_SSL", true),
+
+// 		CacheTTLMinutes:       getEnv[int]("CACHE_TTL_MINUTES", 10),
+// 	}
+// }
+
 func main() {
-	// Загружаем конфигурацию из .env файла
+
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: .env file not found, using environment variables")
 	}
 
-	// TODO: Загрузить конфигурацию из переменных окружения
-	// cfg := loadConfig()
+	for _, cfg := range []settings.EnvConfigurable{
+		&auth.JWTManagerConfig{},
+		&auth.PasswordManagerConfig{},
+	} {
+		settings.LoadConfig(cfg)
+	}
 
 	// TODO: Подключиться к базе данных
 	// - Создать database.Config из параметров конфигурации
@@ -58,62 +79,17 @@ func main() {
 	// - POST /api/posts/{id}/comments
 
 	// Health check эндпоинт
-	router.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok","service":"blog-api"}`))
-	})
+	router.Get(
+		"/api/health",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status":"ok","service":"blog-api"}`))
+		},
+	)
 
 	// TODO: Запустить HTTP сервер
 	// - Сформировать адрес из конфигурации
 	// - Вывести информацию о запуске
 	// - Запустить сервер и обработать ошибки
-}
-
-// Config представляет конфигурацию приложения
-type Config struct {
-	// Server
-	ServerHost string
-	ServerPort int
-
-	// Database
-	DBHost     string
-	DBPort     int
-	DBUser     string
-	DBPassword string
-	DBName     string
-	DBSSLMode  string
-
-	// JWT
-	JWTSecret      string
-	JWTExpiryHours int
-
-	// Cache
-	CacheTTLMinutes int
-}
-
-// loadConfig загружает конфигурацию из переменных окружения
-func loadConfig() *Config {
-	// TODO: Реализовать загрузку всех параметров конфигурации
-	// Использовать вспомогательные функции getEnv и getEnvAsInt
-	// Установить разумные значения по умолчанию
-
-	return nil // Заменить на правильную реализацию
-}
-
-// getEnv получает значение переменной окружения или возвращает значение по умолчанию
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getEnvAsInt получает значение переменной окружения как int или возвращает значение по умолчанию
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if value, err := strconv.Atoi(valueStr); err == nil {
-		return value
-	}
-	return defaultValue
 }

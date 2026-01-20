@@ -1,26 +1,21 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:15-alpine
     container_name: blog_postgres
-    environment:
-      POSTGRES_USER: bloguser
-      POSTGRES_PASSWORD: blogpassword
-      POSTGRES_DB: blogdb
+    env_file:
+      - .env
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bloguser -d blogdb"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -p ${POSTGRES_PASSWORD} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
-  # Опциональный веб-интерфейс для управления БД
   adminer:
     image: adminer:latest
     container_name: blog_adminer

@@ -2,62 +2,95 @@ package auth
 
 import (
 	"errors"
+	"unicode"
+
+	"github.com/tailscale/golang-x-crypto/bcrypt"
+
+	"blog-api/pkg/settings"
 )
 
+// errors
 var (
-	ErrEmptyPassword    = errors.New("password cannot be empty")
 	ErrPasswordTooShort = errors.New("password is too short")
+	ErrPasswordTooWeak  = errors.New("password too weak")
+	ErrPasswordTooLong  = bcrypt.ErrPasswordTooLong
 )
 
-// HashPassword хеширует пароль используя bcrypt
-func HashPassword(password string) (string, error) {
-	// TODO: Реализовать хеширование пароля
-	// Шаги:
-	// 1. Проверить что пароль не пустой
-	// 2. Использовать bcrypt для хеширования
-	// 3. Выбрать подходящий cost factor (например, 10-12)
-	// 4. Вернуть хешированный пароль как строку
-	//
-	// Подсказка: используйте golang.org/x/crypto/bcrypt
-
-	return "", errors.New("not implemented")
+// config
+type PasswordManagerConfig struct {
+	MinLength         int
+	Cost              int
+	CaseShiftRequired bool
+	DigitsRequired    bool
+	SymbolsRequired   bool
 }
 
-// CheckPassword проверяет соответствие пароля и его хеша
-func CheckPassword(password, hash string) bool {
-	// TODO: Реализовать проверку пароля
-	// Шаги:
-	// 1. Сравнить пароль с хешом используя bcrypt
-	// 2. Вернуть true если пароль совпадает, false если нет
-	// 3. При ошибке вернуть false
-	//
-	// Подсказка: bcrypt.CompareHashAndPassword
-
-	return false
+func (c *PasswordManagerConfig) Setup() []settings.EnvLoadable {
+	return []settings.EnvLoadable{
+		settings.Item[int]{Name: "PASSWORD_MIN_LENGTH", Default: 6, Field: &c.MinLength},
+		settings.Item[int]{Name: "PASSWORD_COST", Default: bcrypt.DefaultCost, Field: &c.MinLength},
+		settings.Item[bool]{Name: "PASSWORD_MUST_SHIFT_CASE", Default: true, Field: &c.CaseShiftRequired},
+		settings.Item[bool]{Name: "PASSWORD_MUST_HAVE_DIGITS", Default: true, Field: &c.DigitsRequired},
+		settings.Item[bool]{Name: "PASSWORD_MUST_HAVE_SYMBOLS", Default: true, Field: &c.DigitsRequired},
+	}
 }
 
-// ValidatePasswordStrength проверяет надежность пароля
-func ValidatePasswordStrength(password string) error {
-	// TODO: Реализовать проверку надежности пароля
-	// Требования:
-	// - Минимум 6 символов
-	// - Опционально: содержит буквы и цифры
-	// - Опционально: содержит заглавные и строчные буквы
-	//
-	// Вернуть соответствующую ошибку или nil
-
-	return errors.New("not implemented")
+// manager
+type PasswordManager struct {
+	config *PasswordManagerConfig
 }
 
-// GenerateRandomPassword генерирует случайный пароль (опциональное задание)
-func GenerateRandomPassword(length int) (string, error) {
-	// TODO: Реализовать генерацию случайного пароля
-	// Шаги:
-	// 1. Создать набор допустимых символов
-	// 2. Сгенерировать случайную последовательность заданной длины
-	// 3. Вернуть пароль как строку
-	//
-	// Подсказка: используйте crypto/rand для криптографически стойкой генерации
+func NewPasswordManager(config *PasswordManagerConfig) *PasswordManager {
+	if config == nil {
+		panic("PasswordManager requires a non-nil config")
+	}
+	return &PasswordManager{config: config}
+}
 
-	return "", errors.New("not implemented")
+func (pm *PasswordManager) ValidatePasswordStrength(password string) error {
+	if len(password) < pm.config.MinLength {
+		return ErrPasswordTooShort
+	}
+	var hasUpper, hasLower, hasDigit, hasSymbol bool
+	for _, r := range password {
+		if !hasUpper && unicode.IsUpper(r) {
+			hasUpper = true
+		}
+		if !hasLower && unicode.IsLower(r) {
+			hasLower = true
+		}
+		if !hasDigit && unicode.IsDigit(r) {
+			hasDigit = true
+		}
+		if !hasSymbol && (unicode.IsSymbol(r) || unicode.IsPunct(r)) {
+			hasSymbol = true
+		}
+		if (!pm.config.CaseShiftRequired || (hasUpper && hasLower)) &&
+			(!pm.config.DigitsRequired || hasDigit) &&
+			(!pm.config.SymbolsRequired || hasSymbol) {
+			break
+		}
+	}
+	if (pm.config.CaseShiftRequired && (!hasUpper || !hasLower)) ||
+		(pm.config.DigitsRequired && !hasDigit) ||
+		(pm.config.SymbolsRequired && !hasSymbol) {
+		return ErrPasswordTooWeak
+	}
+
+	return nil
+}
+
+func (pm *PasswordManager) HashPassword(password string) (string, error) {
+	if err := pm.ValidatePasswordStrength(password); err != nil {
+		return "", err
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), pm.config.Cost)
+	if err != nil {
+		return "", err
+	}
+	return string(passwordHash), nil
+}
+
+func (pm *PasswordManager) CheckPassword(password, hash string) bool {
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

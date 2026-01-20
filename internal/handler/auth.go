@@ -44,6 +44,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
 
+// Refresh обрабатывает запрос на обновление access токена
+// POST /api/refresh
+func (h *AuthHandler) Reresh(w http.ResponseWriter, r *http.Request) {
+	// TODO:
+
+	http.Error(w, "Not implemented", http.StatusNotImplemented)
+}
+
 // GetProfile возвращает профиль текущего пользователя (опционально)
 // Этот метод не используется в эталонной реализации
 func (h *AuthHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
