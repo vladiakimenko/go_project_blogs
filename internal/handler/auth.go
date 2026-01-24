@@ -1,9 +1,14 @@
 package handler
 
 import (
-	"blog-api/internal/service"
-	"context"
 	"net/http"
+	"strconv"
+
+	"blog-api/internal/model"
+	"blog-api/internal/service"
+	"blog-api/pkg/exception"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type AuthHandler struct {
@@ -16,63 +21,81 @@ func NewAuthHandler(userService *service.UserService) *AuthHandler {
 	}
 }
 
-// Register обрабатывает запрос на регистрацию нового пользователя
 // POST /api/register
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработку регистрации
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть POST)
-	// 2. Декодировать JSON тело в UserCreateRequest
-	// 3. Вызвать userService.Register
-	// 4. Обработать ошибки (ErrUserAlreadyExists -> 409 Conflict)
-	// 5. Вернуть JSON ответ с токеном (201 Created)
+	body, ok := getParsedBody[model.UserCreateRequest](r)
+	if !ok {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid request body"))
+	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	result, apiErr := h.userService.Register(r.Context(), body)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
 }
 
-// Login обрабатывает запрос на вход пользователя
 // POST /api/login
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработку входа
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть POST)
-	// 2. Декодировать JSON тело в UserLoginRequest
-	// 3. Вызвать userService.Login
-	// 4. Обработать ошибки (ErrInvalidCredentials -> 401 Unauthorized)
-	// 5. Вернуть JSON ответ с токеном (200 OK)
+	body, ok := getParsedBody[model.UserLoginRequest](r)
+	if !ok {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid request body"))
+	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	result, apiErr := h.userService.Login(r.Context(), body)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
-// Refresh обрабатывает запрос на обновление access токена
 // POST /api/refresh
-func (h *AuthHandler) Reresh(w http.ResponseWriter, r *http.Request) {
-	// TODO:
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	body, ok := getParsedBody[model.RefreshTokenRequest](r)
+	if !ok {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid request body"))
+		return
+	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	result, apiErr := h.userService.RefreshToken(r.Context(), body)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
-// GetProfile возвращает профиль текущего пользователя (опционально)
-// Этот метод не используется в эталонной реализации
+// GET /api/users/{userID}
 func (h *AuthHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
-	// TODO: Опционально - реализовать получение профиля
-	// Этот эндпоинт не обязателен для базовой реализации
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
-}
+	actorID, ok := getActorID(r.Context())
+	if !ok {
+		exception.WriteApiError(w, exception.InternalServerError("Auth misconfigured"))
+		return
+	}
 
-// writeError отправляет JSON ответ с ошибкой
-func writeError(w http.ResponseWriter, message string, statusCode int) {
-	// TODO: Реализовать отправку ошибки в формате JSON
-	// Создать структуру ErrorResponse и отправить как JSON
+	userIDStr := chi.URLParam(r, "userID")
+	userID, err := strconv.Atoi(userIDStr)
+	if err != nil {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid user ID"))
+		return
+	}
 
-	http.Error(w, message, statusCode)
-}
+	if actorID != userID {
+		exception.WriteApiError(w, exception.ForbiddenError("Access deined"))
+		return
+	}
 
-// getUserIDFromContext извлекает ID пользователя из контекста
-func getUserIDFromContext(ctx context.Context) (int, bool) {
-	// TODO: Извлечь userID из контекста
-	// Ключ устанавливается в auth middleware
+	result, apiErr := h.userService.GetByID(r.Context(), userID)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
 
-	return 0, false
+	writeJSON(w, http.StatusOK, result)
 }

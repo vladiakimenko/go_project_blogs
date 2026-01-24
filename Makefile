@@ -47,12 +47,12 @@ deps: ## Скачать зависимости
 	@echo "$(GREEN)Dependencies downloaded$(NC)"
 
 .PHONY: docker-up
-docker-up: ## Запустить PostgreSQL в Docker
-	@echo "$(GREEN)Starting PostgreSQL...$(NC)"
-	$(DOCKER_COMPOSE) up -d postgres
+docker-up: ## Запустить все Docker сервисы
+	@echo "$(GREEN)Starting Docker services...$(NC)"
+	$(DOCKER_COMPOSE) up -d
 	@echo "$(GREEN)Waiting for PostgreSQL to be ready...$(NC)"
 	@sleep 5
-	@echo "$(GREEN)PostgreSQL started$(NC)"
+	@echo "$(GREEN)All services started$(NC)"
 
 .PHONY: docker-down
 docker-down: ## Остановить Docker контейнеры
@@ -63,7 +63,7 @@ docker-down: ## Остановить Docker контейнеры
 .PHONY: db-shell
 db-shell: ## Подключиться к PostgreSQL через psql
 	@echo "$(GREEN)Connecting to PostgreSQL...$(NC)"
-	docker exec -it blog_postgres psql -U bloguser -d blogdb
+	docker exec -it blog_postgres psql -U ${POSTGRES_USER} -d ${POSTGRES_DB}
 
 .PHONY: dev
 dev: docker-up ## Запустить в режиме разработки (БД + приложение)

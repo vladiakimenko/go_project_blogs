@@ -1,8 +1,13 @@
 package handler
 
 import (
+	"blog-api/internal/model"
 	"blog-api/internal/service"
+	"blog-api/pkg/exception"
 	"net/http"
+	"strconv"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type PostHandler struct {
@@ -15,105 +20,138 @@ func NewPostHandler(postService *service.PostService) *PostHandler {
 	}
 }
 
-// Create обрабатывает создание нового поста
-// POST /api/posts
-// Требует аутентификации
-func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать создание поста
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть POST)
-	// 2. Получить userID из контекста (установлен middleware)
-	// 3. Декодировать JSON тело в PostCreateRequest
-	// 4. Создать пост через postService.Create
-	// 5. Вернуть созданный пост как JSON (201 Created)
-
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
-}
-
-// GetByID возвращает пост по ID
-// GET /api/posts/{id}
-// Не требует аутентификации
-func (h *PostHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать получение поста по ID
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть GET)
-	// 2. Извлечь ID из URL пути
-	// 3. Получить пост через postService.GetByID
-	// 4. Обработать ошибки (ErrPostNotFound -> 404)
-	// 5. Вернуть пост как JSON (200 OK)
-
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
-}
-
-// GetAll возвращает список постов с пагинацией
 // GET /api/posts?limit=10&offset=0
-// Не требует аутентификации
 func (h *PostHandler) GetAll(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать получение списка постов
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть GET)
-	// 2. Извлечь параметры пагинации из query string
-	// 3. Получить посты через postService.GetAll
-	// 4. Создать ответ с метаданными пагинации
-	// 5. Вернуть список постов как JSON (200 OK)
+	pagination, ok := getPaginationParams(r)
+	if !ok {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid pagination parameters"))
+		return
+	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	result, total, apiErr := h.postService.GetAll(r.Context(), pagination)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	writePaginatedJSON(w, http.StatusOK, result, pagination, total)
 }
 
-// Update обновляет пост
-// PUT /api/posts/{id}
-// Требует аутентификации, может обновить только автор
+// GET /api/posts/{postID}
+func (h *PostHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	postIDStr := chi.URLParam(r, "postID")
+	postID, err := strconv.Atoi(postIDStr)
+	if err != nil {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid post ID"))
+		return
+	}
+
+	result, apiErr := h.postService.GetByID(r.Context(), postID)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// POST /api/posts
+func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
+	body, ok := getParsedBody[model.PostCreateRequest](r)
+	if !ok {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid request body"))
+		return
+	}
+
+	actorID, ok := getActorID(r.Context())
+	if !ok {
+		exception.WriteApiError(w, exception.InternalServerError("Auth misconfigured"))
+		return
+	}
+
+	result, apiErr := h.postService.Create(r.Context(), actorID, body)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, result)
+}
+
+// PUT /api/posts/{postID}
 func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обновление поста
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть PUT)
-	// 2. Получить userID из контекста
-	// 3. Извлечь ID поста из URL
-	// 4. Декодировать JSON тело в PostUpdateRequest
-	// 5. Обновить через postService.Update
-	// 6. Обработать ошибки (404 для не найден, 403 для чужого поста)
-	// 7. Вернуть обновленный пост как JSON (200 OK)
+	body, ok := getParsedBody[model.PostUpdateRequest](r)
+	if !ok {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid request body"))
+		return
+	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	actorID, ok := getActorID(r.Context())
+	if !ok {
+		exception.WriteApiError(w, exception.InternalServerError("Auth misconfigured"))
+		return
+	}
+
+	postIDStr := chi.URLParam(r, "postID")
+	postID, err := strconv.Atoi(postIDStr)
+	if err != nil {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid post ID"))
+		return
+	}
+
+	result, apiErr := h.postService.Update(r.Context(), postID, actorID, body)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
-// Delete удаляет пост
-// DELETE /api/posts/{id}
-// Требует аутентификации, может удалить только автор
+// DELETE /api/posts/{postID}
 func (h *PostHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать удаление поста
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть DELETE)
-	// 2. Получить userID из контекста
-	// 3. Извлечь ID поста из URL
-	// 4. Удалить через postService.Delete
-	// 5. Обработать ошибки (404 для не найден, 403 для чужого поста)
-	// 6. Вернуть 204 No Content при успехе
+	actorID, ok := getActorID(r.Context())
+	if !ok {
+		exception.WriteApiError(w, exception.InternalServerError("Auth misconfigured"))
+		return
+	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	postIDStr := chi.URLParam(r, "postID")
+	postID, err := strconv.Atoi(postIDStr)
+	if err != nil {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid post ID"))
+		return
+	}
+
+	apiErr := h.postService.Delete(r.Context(), postID, actorID)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// GetByAuthor возвращает посты конкретного автора
-// GET /api/posts/author/{authorID}?limit=10&offset=0
-// Не требует аутентификации
+// GET /api/posts?limit=10&offset=0&author={authorID}
 func (h *PostHandler) GetByAuthor(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать получение постов автора
-	// Шаги:
-	// 1. Проверить метод запроса (должен быть GET)
-	// 2. Извлечь ID автора из URL
-	// 3. Извлечь параметры пагинации из query string
-	// 4. Получить посты через postService.GetByAuthor
-	// 5. Создать ответ с метаданными и списком постов
-	// 6. Вернуть как JSON (200 OK)
+	pagination, ok := getPaginationParams(r)
+	if !ok {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid pagination parameters"))
+		return
+	}
 
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
-}
+	authorIDStr := r.URL.Query().Get("author")
+	authorID, err := strconv.Atoi(authorIDStr)
+	if err != nil {
+		exception.WriteApiError(w, exception.BadRequestError("Invalid author ID"))
+		return
+	}
 
-// extractIDFromPath извлекает ID из пути URL
-func extractIDFromPath(path, prefix string) string {
-	// TODO: Реализовать извлечение ID из пути
-	// Пример: path = "/api/posts/123", prefix = "/api/posts/"
-	// Должен вернуть "123"
+	result, total, apiErr := h.postService.GetByAuthor(r.Context(), authorID, pagination)
+	if apiErr != nil {
+		exception.WriteApiError(w, apiErr)
+		return
+	}
 
-	return ""
+	writePaginatedJSON(w, http.StatusOK, result, pagination, total)
 }

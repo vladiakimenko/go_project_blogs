@@ -1,95 +1,168 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
 
+	"blog-api/internal/handler"
+	"blog-api/internal/middleware"
+	"blog-api/internal/model"
+	"blog-api/internal/repository"
+	"blog-api/internal/service"
 	"blog-api/pkg/auth"
+	"blog-api/pkg/database"
 	"blog-api/pkg/settings"
+	"blog-api/pkg/throttle"
 )
-
-// func loadConfig() *Config {
-// 	return &Config{
-// 		ServerHost:            getEnv[string]("HOST", "localhost"),
-// 		ServerPort:            getEnv[int]("PORT", 8000),
-
-// 		DBHost:                getEnv[string]("POSTGRES_HOST", "localhost"),
-// 		DBPort:                getEnv[int]("POSTGRES_PORT", 5432),
-// 		DBUser:                getEnv[string]("POSTGRES_USER", noDefault),
-// 		DBPassword:            getEnv[string]("POSTGRES_PASSWORD", noDefault),
-// 		DBName:                getEnv[string]("POSTGRES_DB", noDefault),
-// 		DBSSLMode:             getEnv[bool]("POSTGRES_SSL", true),
-
-// 		CacheTTLMinutes:       getEnv[int]("CACHE_TTL_MINUTES", 10),
-// 	}
-// }
 
 func main() {
 
+	// load config
 	if err := godotenv.Load(); err != nil {
 		log.Printf("Warning: .env file not found, using environment variables")
 	}
-
+	dbConfig := &database.DatabaseConfig{}
+	jwtConfig := &auth.JWTConfig{}
+	passConfig := &auth.PasswordConfig{}
+	redisConfig := &middleware.RedisConfig{}
 	for _, cfg := range []settings.EnvConfigurable{
-		&auth.JWTManagerConfig{},
-		&auth.PasswordManagerConfig{},
+		dbConfig,
+		jwtConfig,
+		passConfig,
+		redisConfig,
 	} {
 		settings.LoadConfig(cfg)
 	}
 
-	// TODO: Подключиться к базе данных
-	// - Создать database.Config из параметров конфигурации
-	// - Вызвать database.NewPostgresDB
-	// - Обработать ошибки подключения
-	// - Не забыть defer db.Close()
+	// database
+	db, err := database.NewDatabaseManager(dbConfig)
+	if err != nil {
+		panic(err)
+	}
+	defer db.Dispose()
+	db.InitORM()
 
-	// TODO: Выполнить миграции базы данных
-	// - Вызвать database.Migrate(db)
+	// auth
+	jwtManager := auth.NewJWTManager(jwtConfig)
+	passManager := auth.NewPasswordManager(passConfig)
 
-	// TODO: Инициализировать JWT менеджер
-	// - Создать jwtManager через auth.NewJWTManager
+	// repos
+	userRepo := repository.NewUserRepo(db)
+	refreshTokenRepo := repository.NewRefreshTokenRepo(db)
+	postRepo := repository.NewPostRepo(db)
+	commentRepo := repository.NewCommentRepo(db)
 
-	// TODO: Создать слои приложения
-	// 1. Репозитории (передать db)
-	// 2. Сервисы (передать репозитории и jwtManager)
-	// 3. Хендлеры (передать сервисы)
-	// 4. Middleware (передать необходимые зависимости)
+	// services
+	userService := service.NewUserService(userRepo, refreshTokenRepo, jwtManager, passManager)
+	postService := service.NewPostService(postRepo, userRepo)
+	commentService := service.NewCommentService(commentRepo, postRepo, userRepo)
 
-	// Настраиваем маршруты
+	// handlers
+	userHandler := handler.NewAuthHandler(userService)
+	postHandler := handler.NewPostHandler(postService)
+	commentHandler := handler.NewCommentHandler(commentService)
+
+	authMiddleware := middleware.NewAuthMiddleware(jwtManager)
+
 	router := chi.NewRouter()
 
-	// TODO: Настроить middleware
-	// - Добавить глобальные middleware (logging, recovery, CORS)
+	// global middlewares
+	globalMiddleware := []func(http.Handler) http.Handler{
+		middleware.PanicRecoverMiddleware,
+		middleware.CORSMiddleware,
+		middleware.XRayMiddleware,
+		middleware.RequestLoggerMiddleware,
+	}
 
-	// TODO: Настроить маршруты
-	// Публичные эндпоинты:
-	// - POST /api/register
-	// - POST /api/login
-	// - GET /api/posts
-	// - GET /api/posts/{id}
-	// - GET /api/posts/{id}/comments
-	//
-	// Защищенные эндпоинты (требуют JWT):
-	// - POST /api/posts
-	// - PUT /api/posts/{id}
-	// - DELETE /api/posts/{id}
-	// - POST /api/posts/{id}/comments
+	// throttling
+	throttle.InitRedis(fmt.Sprintf("%s:%d", redisConfig.Host, redisConfig.Port), redisConfig.Password, redisConfig.DB)
 
-	// Health check эндпоинт
-	router.Get(
-		"/api/health",
-		func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok","service":"blog-api"}`))
-		},
+	chain := middleware.Chain(router, globalMiddleware...)
+
+	// health check
+	router.Get("/api/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","service":"blog-api"}`))
+	})
+
+	// auth
+	authThrottler := throttle.NewThrottler("auth", 10, time.Minute)
+
+	router.With(
+		middleware.RateLimiterMiddleware(authThrottler),
+	).Post(
+		"/api/register",
+		middleware.ModelBodyMiddleware[model.UserCreateRequest](userHandler.Register),
 	)
 
-	// TODO: Запустить HTTP сервер
-	// - Сформировать адрес из конфигурации
-	// - Вывести информацию о запуске
-	// - Запустить сервер и обработать ошибки
+	router.With(
+		middleware.RateLimiterMiddleware(authThrottler),
+	).Post(
+		"/api/login",
+		middleware.ModelBodyMiddleware[model.UserLoginRequest](userHandler.Login),
+	)
+
+	// public post endpoints
+	router.Get("/api/posts", postHandler.GetAll)
+	router.Get("/api/posts/{postID}", postHandler.GetByID)
+	router.Get("/api/posts/{postID}/comments", commentHandler.GetByPost)
+
+	// protected routes
+	protected := chi.NewRouter()
+	protected.Use(authMiddleware.RequireAuth)
+
+	// body requests
+	protected.Post(
+		"/api/posts",
+		middleware.ModelBodyMiddleware[model.PostCreateRequest](postHandler.Create),
+	)
+	protected.Put(
+		"/api/posts/{postID}",
+		middleware.ModelBodyMiddleware[model.PostUpdateRequest](postHandler.Update),
+	)
+	protected.Delete("/api/posts/{postID}", postHandler.Delete)
+
+	protected.Post(
+		"/api/posts/{postID}/comments",
+		middleware.ModelBodyMiddleware[model.CommentCreateRequest](commentHandler.Create),
+	)
+	protected.Put(
+		"/api/posts/{postID}/comments/{commentID}",
+		middleware.ModelBodyMiddleware[model.CommentUpdateRequest](commentHandler.Update),
+	)
+	protected.Delete("/api/posts/{postID}/comments/{commentID}", commentHandler.Delete)
+
+	// me
+	protected.Get("/api/users/{userID}", userHandler.GetProfile)
+
+	router.Mount("/", protected)
+	host := os.Getenv("HOST")
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	addr := host + ":" + port
+
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      chain,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	log.Printf("Starting server at %s...", addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("Server error: %v", err)
+	}
 }

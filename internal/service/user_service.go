@@ -1,82 +1,168 @@
 package service
 
 import (
-	"blog-api/internal/model"
-	"blog-api/internal/repository"
-	"blog-api/pkg/auth"
 	"context"
 	"errors"
 	"fmt"
-)
+	"log"
+	"time"
 
-var (
-	ErrUserAlreadyExists  = errors.New("user already exists")
-	ErrInvalidCredentials = errors.New("invalid credentials")
-	ErrUserNotFound       = errors.New("user not found")
+	"blog-api/internal/model"
+	"blog-api/internal/repository"
+	"blog-api/pkg/auth"
+	"blog-api/pkg/exception"
+
+	"github.com/gofrs/uuid/v5"
 )
 
 type UserService struct {
-	userRepo   repository.UserRepository
-	jwtManager *auth.JWTManager
+	userRepo         repository.UserRepository
+	refreshTokenRepo repository.RefreshTokenRepository
+	jwtManager       *auth.JWTManager
+	passwordManager  *auth.PasswordManager
 }
 
-func NewUserService(userRepo repository.UserRepository, jwtManager *auth.JWTManager) *UserService {
+func NewUserService(
+	userRepo repository.UserRepository,
+	refreshTokenRepo repository.RefreshTokenRepository,
+	jwtManager *auth.JWTManager,
+	passwordManager *auth.PasswordManager,
+) *UserService {
 	return &UserService{
-		userRepo:   userRepo,
-		jwtManager: jwtManager,
+		userRepo:         userRepo,
+		refreshTokenRepo: refreshTokenRepo,
+		jwtManager:       jwtManager,
+		passwordManager:  passwordManager,
 	}
 }
 
-func (s *UserService) Register(ctx context.Context, req *model.UserCreateRequest) (*model.TokenResponse, error) {
-	// TODO: Реализовать регистрацию пользователя
-	// Шаги:
-	// 1. Валидация входных данных (username >= 3 символов, email валидный, пароль >= 6 символов)
-	// 2. Проверить уникальность email через репозиторий
-	// 3. Проверить уникальность username через репозиторий
-	// 4. Захешировать пароль используя пакет auth
-	// 5. Создать модель пользователя с хешированным паролем
-	// 6. Сохранить пользователя через репозиторий
-	// 7. Сгенерировать JWT токен для нового пользователя
-	// 8. Вернуть TokenResponse с токеном и данными пользователя
+func (s *UserService) Register(
+	ctx context.Context,
+	req *model.UserCreateRequest,
+) (*model.TokenResponse, *exception.ApiError) {
+	exists, err := s.userRepo.ExistsByField(ctx, "email", req.Email)
+	if err != nil {
+		log.Printf("failed to check user existance: %v", err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	if exists {
+		return nil, exception.ConflictError("email already exists")
+	}
+	exists, err = s.userRepo.ExistsByField(ctx, "username", req.Username)
+	if err != nil {
+		log.Printf("failed to check user existance: %v", err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	if exists {
+		return nil, exception.ConflictError("username already exists")
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	if err := s.passwordManager.ValidatePasswordStrength(req.Password); err != nil {
+		return nil, exception.BadRequestError(err.Error())
+	}
+	hashedPassword, err := s.passwordManager.HashPassword(req.Password)
+	if err != nil {
+		log.Printf("failed to hash a password: %v", err)
+		return nil, exception.InternalServerError("failed to hash password")
+	}
+
+	user := &model.User{
+		Email:        req.Email,
+		Username:     req.Username,
+		PasswordHash: hashedPassword,
+	}
+	if err := s.userRepo.Create(ctx, user); err != nil {
+		log.Printf("failed to create a user: %v", err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+
+	return s.createTokenPair(ctx, user.ID)
 }
 
-func (s *UserService) Login(ctx context.Context, req *model.UserLoginRequest) (*model.TokenResponse, error) {
-	// TODO: Реализовать вход пользователя
-	// Шаги:
-	// 1. Валидация входных данных
-	// 2. Найти пользователя по email через репозиторий
-	// 3. Проверить пароль используя функцию из пакета auth
-	// 4. Сгенерировать JWT токен при успешной аутентификации
-	// 5. Вернуть TokenResponse
-	// ВАЖНО: При ошибке не раскрывать, что именно неправильно (email или пароль)
+func (s *UserService) Login(
+	ctx context.Context,
+	req *model.UserLoginRequest,
+) (*model.TokenResponse, *exception.ApiError) {
+	user, err := s.userRepo.GetByField(ctx, "email", req.Email)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			// Do not reveal if email exists or not
+			return nil, exception.BadRequestError("invalid email or password")
+		}
+		log.Printf("failed to fetch a user: %v", err)
+		return nil, exception.DatabaseError(err.Error())
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	if !s.passwordManager.CheckPassword(req.Password, user.PasswordHash) {
+		return nil, exception.BadRequestError("invalid email or password")
+	}
+
+	return s.createTokenPair(ctx, user.ID)
 }
 
-func (s *UserService) GetByID(ctx context.Context, id int) (*model.User, error) {
-	// TODO: Получить пользователя по ID через репозиторий
+func (s *UserService) RefreshToken(
+	ctx context.Context,
+	req *model.RefreshTokenRequest,
+) (*model.TokenResponse, *exception.ApiError) {
+	tokenUUID, err := uuid.FromString(req.RefreshToken)
+	if err != nil {
+		return nil, exception.BadRequestError("failed to parse the refresh token value as UUID")
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	rt, err := s.refreshTokenRepo.GetByValue(ctx, tokenUUID)
+	if err != nil {
+		if errors.Is(err, repository.ErrRefreshTokenNotFound) {
+			return nil, exception.BadRequestError("refresh token not found")
+		}
+		log.Printf("failed to fetch a refresh token: %v", err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+
+	if time.Now().After(rt.ExpiresAt) {
+		if err := s.refreshTokenRepo.DeleteByValue(ctx, tokenUUID); err != nil {
+			log.Printf("failed to delete expired refresh token: %v", err)
+		}
+		return nil, exception.BadRequestError("refresh token expired")
+	}
+
+	if err := s.refreshTokenRepo.DeleteByValue(ctx, tokenUUID); err != nil {
+		log.Printf("failed to delete expired refresh token: %v", err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+
+	return s.createTokenPair(ctx, rt.UserID)
 }
 
-func (s *UserService) GetByEmail(ctx context.Context, email string) (*model.User, error) {
-	// TODO: Получить пользователя по email через репозиторий
+func (s *UserService) createTokenPair(ctx context.Context, userID int) (*model.TokenResponse, *exception.ApiError) {
+	accessToken, accessExpiresAt, err := s.jwtManager.GenerateToken(userID)
+	if err != nil {
+		return nil, exception.InternalServerError("failed to generate access token")
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	refreshToken := &model.RefreshToken{
+		Value:     uuid.Must(uuid.NewV4()),
+		UserID:    userID,
+		ExpiresAt: time.Now().Add(s.jwtManager.RefreshTokenTTL),
+	}
+	if err := s.refreshTokenRepo.Create(ctx, refreshToken); err != nil {
+		return nil, exception.DatabaseError(err.Error())
+	}
+
+	return &model.TokenResponse{
+		AccessToken:        accessToken,
+		AccessTokenExpiry:  accessExpiresAt,
+		RefreshToken:       refreshToken.Value.String(),
+		RefreshTokenExpiry: refreshToken.ExpiresAt,
+	}, nil
 }
 
-// validateUserCreateRequest проверяет корректность данных для регистрации
-func validateUserCreateRequest(req *model.UserCreateRequest) error {
-	// TODO: Реализовать проверку всех полей
-
-	return nil
-}
-
-// validateUserLoginRequest проверяет корректность данных для входа
-func validateUserLoginRequest(req *model.UserLoginRequest) error {
-	// TODO: Реализовать проверку полей
-
-	return nil
+func (s *UserService) GetByID(ctx context.Context, id int) (*model.User, *exception.ApiError) {
+	user, err := s.userRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return nil, exception.NotFoundError(fmt.Sprintf("user with id=%d not found", id))
+		}
+		return nil, exception.DatabaseError(fmt.Sprintf("failed to get user by id=%d: %v", id, err))
+	}
+	return user, nil
 }

@@ -1,94 +1,128 @@
 package model
 
 import (
+	"errors"
+	"regexp"
 	"time"
+
+	"github.com/gofrs/uuid/v5"
 )
 
-// User представляет модель пользователя в системе
+// domain
 type User struct {
-	ID        int       `json:"id" db:"id"`
-	Username  string    `json:"username" db:"username"`
-	Email     string    `json:"email" db:"email"`
-	Password  string    `json:"-" db:"password"` // Хешированный пароль, не отдаем в JSON
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	ID           int       `json:"id" gorm:"primaryKey;autoIncrement"`
+	Username     string    `json:"username" gorm:"unique;not null"`
+	Email        string    `json:"email" gorm:"unique;not null"`
+	Password     string    `json:"password,omitempty" gorm:"-"`
+	PasswordHash string    `json:"-" gorm:"column:password_hash;not null"`
+	CreatedAt    time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt    time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// Post представляет модель поста в блоге
+type RefreshToken struct {
+	Value     uuid.UUID `gorm:"type:uuid;primaryKey"`
+	UserID    int       `gorm:"index;not null"`
+	ExpiresAt time.Time `gorm:"index;not null"`
+	CreatedAt time.Time
+}
+
 type Post struct {
-	ID        int       `json:"id" db:"id"`
-	Title     string    `json:"title" db:"title"`
-	Content   string    `json:"content" db:"content"`
-	AuthorID  int       `json:"author_id" db:"author_id"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	ID        int       `json:"id" db:"id" gorm:"primaryKey;autoIncrement"`
+	Title     string    `json:"title" db:"title" gorm:"not null"`
+	Content   string    `json:"content" db:"content" gorm:"not null"`
+	AuthorID  int       `json:"author_id" db:"author_id" gorm:"not null;index"`
+	CreatedAt time.Time `json:"created_at" db:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// Comment представляет модель комментария к посту
 type Comment struct {
-	ID        int       `json:"id" db:"id"`
-	Content   string    `json:"content" db:"content"`
-	PostID    int       `json:"post_id" db:"post_id"`
-	AuthorID  int       `json:"author_id" db:"author_id"`
-	CreatedAt time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
+	ID        int       `json:"id" db:"id" gorm:"primaryKey;autoIncrement"`
+	Content   string    `json:"content" db:"content" gorm:"not null"`
+	PostID    int       `json:"post_id" db:"post_id" gorm:"not null;index"`
+	AuthorID  int       `json:"author_id" db:"author_id" gorm:"not null;index"`
+	CreatedAt time.Time `json:"created_at" db:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at" gorm:"autoUpdateTime"`
 }
 
-// UserCreateRequest представляет запрос на создание пользователя
+// requests
 type UserCreateRequest struct {
 	Username string `json:"username" validate:"required,min=3,max=50"`
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required,min=6"`
 }
 
-// UserLoginRequest представляет запрос на вход пользователя
+func (r *UserCreateRequest) CustomValidate() error {
+	emailRegex := `^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`
+	matched, err := regexp.MatchString(emailRegex, r.Email)
+	if err != nil {
+		return err
+	}
+	if !matched {
+		return errors.New("invalid email format")
+	}
+	/* 	NOTE: Password validation must be ensured with
+	auth.PasswordManager.ValidatePasswordStrength at the service layer
+	(since service.UserService already owns an instance) */
+	return nil
+}
+
 type UserLoginRequest struct {
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required"`
 }
 
-// PostCreateRequest представляет запрос на создание поста
+type RefreshTokenRequest struct {
+	RefreshToken string `json:"refreshToken" validate:"required,uuid4"`
+}
+
 type PostCreateRequest struct {
 	Title   string `json:"title" validate:"required,min=1,max=200"`
 	Content string `json:"content" validate:"required,min=1"`
 }
 
-// PostUpdateRequest представляет запрос на обновление поста
 type PostUpdateRequest struct {
-	Title   string `json:"title" validate:"required,min=1,max=200"`
-	Content string `json:"content" validate:"required,min=1"`
+	Title   *string `json:"title,omitempty" validate:"omitempty,max=200"`
+	Content *string `json:"content,omitempty" validate:"omitempty,min=1"`
 }
 
-// CommentCreateRequest представляет запрос на создание комментария
 type CommentCreateRequest struct {
 	Content string `json:"content" validate:"required,min=1,max=1000"`
 }
 
-// TODO: Добавить следующие структуры и методы:
+type CommentUpdateRequest struct {
+	Content string `json:"content" validate:"required,min=1,max=1000"`
+}
 
-// UserResponse - структура для ответа с данными пользователя (без пароля)
-// Поля: ID, Username, Email, CreatedAt
+// GET params
+type PaginationParams struct {
+	Limit  *int `form:"limit" validate:"omitempty,min=0,max=100"`
+	Offset *int `form:"offset" validate:"omitempty,min=0"`
+}
 
-// TokenResponse - структура для ответа с JWT токеном
-// Поля: Token (string), ExpiresAt (time.Time), User (UserResponse)
+func (p *PaginationParams) PostValidate() error {
+	if p.Limit == nil {
+		defaultLimit := 20
+		p.Limit = &defaultLimit
+	}
+	if p.Offset == nil {
+		defaultOffset := 0
+		p.Offset = &defaultOffset
+	}
+	return nil
+}
 
-// PostResponse - структура для ответа с данными поста
-// Поля: ID, Title, Content, Author (UserResponse), CreatedAt, UpdatedAt
+// responses
+type TokenResponse struct {
+	AccessToken        string    `json:"access_token"`
+	AccessTokenExpiry  time.Time `json:"access_token_expires_at"`
+	RefreshToken       string    `json:"refresh_token"`
+	RefreshTokenExpiry time.Time `json:"refresh_token_expires_at"`
+	User               *User     `json:"user"`
+}
 
-// CommentResponse - структура для ответа с данными комментария
-// Поля: ID, Content, PostID, Author (UserResponse), CreatedAt, UpdatedAt
-
-// TODO: Реализовать методы для моделей:
-
-// User.ToResponse() UserResponse - преобразует User в UserResponse
-
-// Post.CanBeEditedBy(userID int) bool - проверяет, может ли пользователь редактировать пост
-
-// Post.CanBeDeletedBy(userID int) bool - проверяет, может ли пользователь удалить пост
-
-// Comment.CanBeEditedBy(userID int) bool - проверяет, может ли пользователь редактировать комментарий
-
-// Comment.CanBeDeletedBy(userID int) bool - проверяет, может ли пользователь удалить комментарий
-
-// HINT: Пользователь может редактировать/удалять только свои посты и комментарии
-// (сравните AuthorID с переданным userID)
+type PaginatedResponse[T any] struct {
+	Data   T   `json:"data"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+	Total  int `json:"total"`
+}

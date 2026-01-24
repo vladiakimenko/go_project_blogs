@@ -1,16 +1,13 @@
 package service
 
 import (
-	"blog-api/internal/model"
-	"blog-api/internal/repository"
 	"context"
 	"errors"
-	"fmt"
-)
+	"log"
 
-var (
-	ErrCommentNotFound = errors.New("comment not found")
-	ErrPostNotExists   = errors.New("post does not exist")
+	"blog-api/internal/model"
+	"blog-api/internal/repository"
+	"blog-api/pkg/exception"
 )
 
 type CommentService struct {
@@ -31,89 +28,139 @@ func NewCommentService(
 	}
 }
 
-func (s *CommentService) Create(ctx context.Context, userID int, req *model.CommentCreateRequest) (*model.Comment, error) {
-	// TODO: Создать новый комментарий
-	// Шаги:
-	// 1. Валидация данных (content не пустой и <= 1000 символов)
-	// 2. Проверить что пост существует
-	// 3. Создать модель комментария с userID как автором
-	// 4. Сохранить через репозиторий
-	// 5. Опционально: обогатить ответ информацией об авторе
-	// 6. Вернуть созданный комментарий
-
-	return nil, fmt.Errorf("not implemented")
+func (s *CommentService) Create(
+	ctx context.Context,
+	userID int,
+	postID int,
+	req *model.CommentCreateRequest,
+) (*model.Comment, *exception.ApiError) {
+	exists, err := s.postRepo.Exists(ctx, postID)
+	if err != nil {
+		log.Printf("failed to check post existence for post_id=%d: %v", postID, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	if !exists {
+		log.Printf("post with post_id=%d does not exist", postID)
+		return nil, exception.NotFoundError("Post not found")
+	}
+	comment := &model.Comment{
+		Content:  req.Content,
+		PostID:   postID,
+		AuthorID: userID,
+	}
+	if err := s.commentRepo.Create(ctx, comment); err != nil {
+		log.Printf("failed to create comment for post_id=%d, user_id=%d: %v", postID, userID, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	return comment, nil
 }
 
-func (s *CommentService) GetByID(ctx context.Context, id int) (*model.Comment, error) {
-	// TODO: Получить комментарий по ID
-	// Шаги:
-	// 1. Получить комментарий через репозиторий
-	// 2. Опционально: добавить информацию об авторе
-	// 3. Вернуть результат или ErrCommentNotFound
-
-	return nil, fmt.Errorf("not implemented")
+func (s *CommentService) GetByID(ctx context.Context, id int) (*model.Comment, *exception.ApiError) {
+	comment, err := s.commentRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrCommentNotFound) {
+			log.Printf("comment with id=%d not found", id)
+			return nil, exception.NotFoundError("Comment not found")
+		}
+		log.Printf("failed to get comment by id=%d: %v", id, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	return comment, nil
 }
 
-func (s *CommentService) GetByPost(ctx context.Context, postID int, limit, offset int) ([]*model.Comment, int, error) {
-	// TODO: Получить комментарии к посту с пагинацией
-	// Шаги:
-	// 1. Валидировать параметры пагинации (limit по умолчанию 20, максимум 100)
-	// 2. Опционально: проверить существование поста
-	// 3. Получить комментарии через репозиторий
-	// 4. Получить общее количество для пагинации
-	// 5. Опционально: обогатить данные информацией об авторах
-	// 6. Вернуть комментарии и общее количество
-
-	return nil, 0, fmt.Errorf("not implemented")
+func (s *CommentService) GetByPost(
+	ctx context.Context,
+	postID int,
+	pagination *model.PaginationParams,
+) ([]*model.Comment, int, *exception.ApiError) {
+	comments, err := s.commentRepo.GetByPostID(ctx, postID, *pagination.Limit, *pagination.Offset)
+	if err != nil {
+		log.Printf("failed to fetch comments for post_id=%d: %v", postID, err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+	total, err := s.commentRepo.GetCountByPostID(ctx, postID)
+	if err != nil {
+		log.Printf("failed to count comments for post_id=%d: %v", postID, err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+	return comments, total, nil
 }
 
-func (s *CommentService) Update(ctx context.Context, id int, userID int, req *model.CommentUpdateRequest) (*model.Comment, error) {
-	// TODO: Обновить комментарий
-	// Шаги:
-	// 1. Найти существующий комментарий
-	// 2. Проверить что userID является автором (иначе ErrForbidden)
-	// 3. Валидировать новый content
-	// 4. Обновить content и временную метку
-	// 5. Сохранить через репозиторий
-	// 6. Опционально: добавить информацию об авторе
-	// 7. Вернуть обновленный комментарий
+func (s *CommentService) Update(
+	ctx context.Context,
+	id int,
+	userID int,
+	req *model.CommentUpdateRequest,
+) (*model.Comment, *exception.ApiError) {
+	comment, err := s.commentRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrCommentNotFound) {
+			log.Printf("comment with id=%d not found", id)
+			return nil, exception.NotFoundError("Comment not found")
+		}
+		log.Printf("failed to get comment by id=%d: %v", id, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	if err := s.checkOwner(comment, userID); err != nil {
+		return nil, err
+	}
+	comment.Content = req.Content
+	if err := s.commentRepo.Update(ctx, comment); err != nil {
+		log.Printf("failed to update comment id=%d: %v", id, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
 
-	return nil, fmt.Errorf("not implemented")
+	return comment, nil
 }
 
-func (s *CommentService) Delete(ctx context.Context, id int, userID int) error {
-	// TODO: Удалить комментарий
-	// Шаги:
-	// 1. Найти комментарий и проверить существование
-	// 2. Проверить что userID является автором
-	// 3. Удалить через репозиторий
-	// 4. Вернуть соответствующую ошибку при неудаче
-
-	return fmt.Errorf("not implemented")
-}
-
-func (s *CommentService) GetByAuthor(ctx context.Context, authorID int, limit, offset int) ([]*model.Comment, int, error) {
-	// TODO: Получить комментарии конкретного автора
-	// Шаги:
-	// 1. Валидировать параметры пагинации
-	// 2. Получить комментарии автора через репозиторий
-	// 3. Получить общее количество комментариев автора
-	// 4. Опционально: добавить информацию об авторе
-	// 5. Вернуть результат с общим количеством
-
-	return nil, 0, fmt.Errorf("not implemented")
-}
-
-// validateCommentCreateRequest проверяет корректность данных для создания комментария
-func validateCommentCreateRequest(req *model.CommentCreateRequest) error {
-	// TODO: Реализовать валидацию content и PostID
-
+func (s *CommentService) Delete(ctx context.Context, id int, userID int) *exception.ApiError {
+	comment, err := s.commentRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrCommentNotFound) {
+			log.Printf("comment with id=%d not found", id)
+			return exception.NotFoundError("Comment not found")
+		}
+		log.Printf("failed to get comment by id=%d: %v", id, err)
+		return exception.DatabaseError(err.Error())
+	}
+	if err := s.checkOwner(comment, userID); err != nil {
+		return err
+	}
+	if err := s.commentRepo.Delete(ctx, id); err != nil {
+		log.Printf("failed to delete comment id=%d: %v", id, err)
+		return exception.DatabaseError(err.Error())
+	}
 	return nil
 }
 
-// validateCommentUpdateRequest проверяет корректность данных для обновления комментария
-func validateCommentUpdateRequest(req *model.CommentUpdateRequest) error {
-	// TODO: Реализовать валидацию content
+func (s *CommentService) GetByAuthor(
+	ctx context.Context,
+	authorID int,
+	limit int,
+	offset int,
+) ([]*model.Comment, int, *exception.ApiError) {
+	comments, err := s.commentRepo.GetByAuthorID(ctx, authorID, limit, offset)
+	if err != nil {
+		log.Printf("failed to fetch comments for author_id=%d: %v", authorID, err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+	total, err := s.commentRepo.GetCountByAuthorID(ctx, authorID)
+	if err != nil {
+		log.Printf("failed to count comments for author_id=%d: %v", authorID, err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+	return comments, total, nil
+}
 
+func (s *CommentService) checkOwner(comment *model.Comment, userID int) *exception.ApiError {
+	if comment.AuthorID != userID {
+		log.Printf(
+			"user_id=%d is not the author of comment_id=%d (author_id=%d)",
+			userID,
+			comment.ID,
+			comment.AuthorID,
+		)
+		return exception.ForbiddenError("Access to the comment is forbidden")
+	}
 	return nil
 }

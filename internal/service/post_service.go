@@ -1,17 +1,13 @@
 package service
 
 import (
-	"blog-api/internal/model"
-	"blog-api/internal/repository"
 	"context"
 	"errors"
-	"fmt"
-)
+	"log"
 
-var (
-	ErrPostNotFound = errors.New("post not found")
-	ErrUnauthorized = errors.New("unauthorized")
-	ErrForbidden    = errors.New("forbidden")
+	"blog-api/internal/model"
+	"blog-api/internal/repository"
+	"blog-api/pkg/exception"
 )
 
 type PostService struct {
@@ -19,92 +15,141 @@ type PostService struct {
 	userRepo repository.UserRepository
 }
 
-func NewPostService(postRepo repository.PostRepository, userRepo repository.UserRepository) *PostService {
+func NewPostService(
+	postRepo repository.PostRepository,
+	userRepo repository.UserRepository,
+) *PostService {
 	return &PostService{
 		postRepo: postRepo,
 		userRepo: userRepo,
 	}
 }
 
-func (s *PostService) Create(ctx context.Context, userID int, req *model.PostCreateRequest) (*model.Post, error) {
-	// TODO: Создать новый пост
-	// Шаги:
-	// 1. Валидация данных (title не пустой и <= 200 символов, content не пустой)
-	// 2. Создать модель поста с данными из запроса и userID
-	// 3. Сохранить через репозиторий
-	// 4. Вернуть созданный пост
-
-	return nil, fmt.Errorf("not implemented")
+func (s *PostService) Create(ctx context.Context, userID int, req *model.PostCreateRequest) (*model.Post, *exception.ApiError) {
+	post := &model.Post{
+		Title:    req.Title,
+		Content:  req.Content,
+		AuthorID: userID,
+	}
+	if err := s.postRepo.Create(ctx, post); err != nil {
+		log.Printf("failed to create post for user_id=%d: %v", userID, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	return post, nil
 }
 
-func (s *PostService) GetByID(ctx context.Context, id int) (*model.Post, error) {
-	// TODO: Получить пост по ID
-	// Шаги:
-	// 1. Получить пост через репозиторий
-	// 2. Опционально: загрузить информацию об авторе
-	// 3. Вернуть пост
-
-	return nil, fmt.Errorf("not implemented")
+func (s *PostService) GetByID(ctx context.Context, id int) (*model.Post, *exception.ApiError) {
+	post, err := s.postRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrPostNotFound) {
+			log.Printf("post with id=%d not found", id)
+			return nil, exception.NotFoundError("Post not found")
+		}
+		log.Printf("failed to get post by id=%d: %v", id, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	return post, nil
 }
 
-func (s *PostService) GetAll(ctx context.Context, limit, offset int) ([]*model.Post, int, error) {
-	// TODO: Получить список постов с пагинацией
-	// Шаги:
-	// 1. Валидировать и нормализовать параметры пагинации (limit по умолчанию 10, максимум 100)
-	// 2. Получить посты через репозиторий
-	// 3. Получить общее количество для пагинации
-	// 4. Опционально: обогатить данные информацией об авторах
-	// 5. Вернуть посты и общее количество
-
-	return nil, 0, fmt.Errorf("not implemented")
+func (s *PostService) GetAll(
+	ctx context.Context,
+	pagination *model.PaginationParams,
+) ([]*model.Post, int, *exception.ApiError) {
+	posts, err := s.postRepo.GetAll(ctx, *pagination.Limit, *pagination.Offset)
+	if err != nil {
+		log.Printf("failed to fetch posts with limit=%d offset=%d: %v", *pagination.Limit, *pagination.Offset, err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+	total, err := s.postRepo.GetTotalCount(ctx)
+	if err != nil {
+		log.Printf("failed to count total posts: %v", err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+	return posts, total, nil
 }
 
-func (s *PostService) Update(ctx context.Context, id int, userID int, req *model.PostUpdateRequest) (*model.Post, error) {
-	// TODO: Обновить пост
-	// Шаги:
-	// 1. Получить существующий пост
-	// 2. Проверить что userID является автором (иначе ErrForbidden)
-	// 3. Валидировать новые данные (если предоставлены)
-	// 4. Обновить только измененные поля
-	// 5. Сохранить через репозиторий
-	// 6. Вернуть обновленный пост
-
-	return nil, fmt.Errorf("not implemented")
+func (s *PostService) Update(
+	ctx context.Context,
+	id int,
+	userID int,
+	req *model.PostUpdateRequest,
+) (*model.Post, *exception.ApiError) {
+	post, err := s.postRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrPostNotFound) {
+			log.Printf("post with id=%d not found", id)
+			return nil, exception.NotFoundError("Post not found")
+		}
+		log.Printf("failed to fetch post id=%d: %v", id, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	if err := s.checkPostOwner(post, userID); err != nil {
+		return nil, err
+	}
+	updated := false
+	if req.Title != nil && *req.Title != post.Title {
+		post.Title = *req.Title
+		updated = true
+	}
+	if req.Content != nil && *req.Content != post.Content {
+		post.Content = *req.Content
+		updated = true
+	}
+	if !updated {
+		return post, nil
+	}
+	if err := s.postRepo.Update(ctx, post); err != nil {
+		log.Printf("failed to update post id=%d: %v", id, err)
+		return nil, exception.DatabaseError(err.Error())
+	}
+	return post, nil
 }
 
-func (s *PostService) Delete(ctx context.Context, id int, userID int) error {
-	// TODO: Удалить пост
-	// Шаги:
-	// 1. Найти пост и проверить существование
-	// 2. Проверить что userID является автором
-	// 3. Удалить через репозиторий
-	// 4. Вернуть соответствующую ошибку при неудаче
-
-	return fmt.Errorf("not implemented")
-}
-
-func (s *PostService) GetByAuthor(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, int, error) {
-	// TODO: Получить посты конкретного автора
-	// Шаги:
-	// 1. Валидировать параметры пагинации
-	// 2. Получить посты автора через репозиторий
-	// 3. Получить общее количество постов автора
-	// 4. Опционально: добавить информацию об авторе к постам
-	// 5. Вернуть результат с общим количеством
-
-	return nil, 0, fmt.Errorf("not implemented")
-}
-
-// validatePostCreateRequest проверяет корректность данных для создания поста
-func validatePostCreateRequest(req *model.PostCreateRequest) error {
-	// TODO: Реализовать валидацию title и content
-
+func (s *PostService) Delete(ctx context.Context, id int, userID int) *exception.ApiError {
+	post, err := s.postRepo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrPostNotFound) {
+			log.Printf("post with id=%d not found", id)
+			return exception.NotFoundError("Post not found")
+		}
+		log.Printf("failed to get post by id=%d: %v", id, err)
+		return exception.DatabaseError(err.Error())
+	}
+	if err := s.checkPostOwner(post, userID); err != nil {
+		return err
+	}
+	if err := s.postRepo.Delete(ctx, id); err != nil {
+		log.Printf("failed to delete post id=%d: %v", id, err)
+		return exception.DatabaseError(err.Error())
+	}
 	return nil
 }
 
-// validatePostUpdateRequest проверяет корректность данных для обновления поста
-func validatePostUpdateRequest(req *model.PostUpdateRequest) error {
-	// TODO: Реализовать валидацию опциональных полей
+func (s *PostService) GetByAuthor(
+	ctx context.Context,
+	authorID int,
+	pagination *model.PaginationParams,
+) ([]*model.Post, int, *exception.ApiError) {
 
+	posts, err := s.postRepo.GetByAuthorID(ctx, authorID, *pagination.Limit, *pagination.Offset)
+	if err != nil {
+		log.Printf("failed to fetch posts for author_id=%d: %v", authorID, err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+
+	total, err := s.postRepo.GetCountByAuthorID(ctx, authorID)
+	if err != nil {
+		log.Printf("failed to count posts for author_id=%d: %v", authorID, err)
+		return nil, 0, exception.DatabaseError(err.Error())
+	}
+
+	return posts, total, nil
+}
+
+func (s *PostService) checkPostOwner(post *model.Post, userID int) *exception.ApiError {
+	if post.AuthorID != userID {
+		log.Printf("user_id=%d is not the author of post_id=%d", userID, post.ID)
+		return exception.ForbiddenError("Access to the post is forbidden")
+	}
 	return nil
 }

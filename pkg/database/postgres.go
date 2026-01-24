@@ -3,90 +3,131 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	_ "github.com/lib/pq"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+
+	"blog-api/pkg/settings"
 )
 
-// Config содержит параметры подключения к PostgreSQL
-type Config struct {
+// Config
+const (
+	MaxOpenConnections     = 25
+	MaxIdleConnections     = 10
+	ConnMaxLifetimeMinutes = 30
+)
+
+type DatabaseConfig struct {
 	Host     string
 	Port     int
 	User     string
 	Password string
 	DBName   string
-	SSLMode  string
+	SSLMode  bool
 }
 
-// NewPostgresDB создает новое подключение к PostgreSQL
-func NewPostgresDB(cfg Config) (*sql.DB, error) {
-	// TODO: Реализовать подключение к PostgreSQL
-	// Шаги:
-	// 1. Сформировать строку подключения (DSN) из параметров конфигурации
-	// 2. Открыть соединение с БД используя sql.Open("postgres", dsn)
-	// 3. Проверить соединение методом Ping()
-	// 4. Настроить пул соединений (SetMaxOpenConns, SetMaxIdleConns)
-	// 5. Вернуть подключение или ошибку
-
-	return nil, fmt.Errorf("not implemented")
+func (c *DatabaseConfig) Setup() []settings.EnvLoadable {
+	return []settings.EnvLoadable{
+		settings.Item[string]{Name: "POSTGRES_HOST", Default: "localhost", Field: &c.Host},
+		settings.Item[int]{Name: "POSTGRES_PORT", Default: 5432, Field: &c.Port},
+		settings.Item[string]{Name: "POSTGRES_USER", Default: settings.NoDefault, Field: &c.User},
+		settings.Item[string]{Name: "POSTGRES_PASSWORD", Default: settings.NoDefault, Field: &c.Password},
+		settings.Item[string]{Name: "POSTGRES_DB", Default: settings.NoDefault, Field: &c.DBName},
+		settings.Item[bool]{Name: "POSTGRES_SSL", Default: settings.NoDefault, Field: &c.SSLMode},
+	}
 }
 
-// Migrate выполняет миграции базы данных
-func Migrate(db *sql.DB) error {
-	// TODO: Реализовать применение миграций
-	// Шаги:
-	// 1. Создать таблицу users если не существует
-	// 2. Создать таблицу posts если не существует
-	// 3. Создать таблицу comments если не существует
-	// 4. Создать необходимые индексы
-	// 5. Вернуть ошибку если что-то пошло не так
-	//
-	// Структура таблиц:
-	// - users: id, username, email, password_hash, created_at, updated_at
-	// - posts: id, title, content, author_id, created_at, updated_at
-	// - comments: id, content, post_id, author_id, created_at, updated_at
+// Manager
+type DatabaseManager struct {
+	connection *sql.DB
+	ORM        *gorm.DB
+}
 
-	queries := []string{
-		// TODO: Добавить SQL запросы для создания таблиц
-		// Пример:
-		// `CREATE TABLE IF NOT EXISTS users (...)`,
-		// `CREATE TABLE IF NOT EXISTS posts (...)`,
-		// `CREATE TABLE IF NOT EXISTS comments (...)`,
-		// `CREATE INDEX IF NOT EXISTS ...`,
+func NewDatabaseManager(config *DatabaseConfig) (*DatabaseManager, error) {
+	conn, err := sql.Open(
+		"postgres",
+		fmt.Sprintf(
+			"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+			config.Host,
+			config.Port,
+			config.User,
+			config.Password,
+			config.DBName,
+			func() string {
+				if config.SSLMode {
+					return "require"
+				}
+				return "disable"
+			}(),
+		),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed create db connection: %w", err)
 	}
 
-	// TODO: Выполнить каждый запрос в транзакции
-	_ = queries // Удалить после реализации
+	conn.SetMaxOpenConns(MaxOpenConnections)
+	conn.SetMaxIdleConns(MaxIdleConnections)
+	conn.SetConnMaxLifetime(ConnMaxLifetimeMinutes * time.Minute)
 
-	return fmt.Errorf("not implemented")
+	if err := conn.Ping(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("db connection is not functional: %w", err)
+	}
+
+	return &DatabaseManager{connection: conn}, nil
 }
 
-// CheckConnection проверяет соединение с базой данных
-func CheckConnection(db *sql.DB) error {
-	// TODO: Реализовать проверку соединения
-	// Использовать db.Ping() для проверки
-
-	return fmt.Errorf("not implemented")
+func (dm *DatabaseManager) InitORM() error {
+	var err error
+	dm.ORM, err = gorm.Open(
+		postgres.New(
+			postgres.Config{Conn: dm.connection},
+		),
+		&gorm.Config{},
+	)
+	return err
 }
 
-// GetDSN формирует строку подключения к PostgreSQL
-func GetDSN(cfg Config) string {
-	// TODO: Сформировать DSN строку
-	// Формат: "host=%s port=%d user=%s password=%s dbname=%s sslmode=%s"
-
-	return ""
+func (dm *DatabaseManager) Dispose() error {
+	if dm.connection == nil {
+		return fmt.Errorf("no db connection was ever established")
+	}
+	if err := dm.connection.Close(); err != nil {
+		return fmt.Errorf("failed to close the db connection: %w", err)
+	}
+	return nil
 }
 
-// Close закрывает соединение с базой данных
-func Close(db *sql.DB) error {
-	// TODO: Корректно закрыть соединение
+func (dm *DatabaseManager) ExecUnsafe(query string, args ...any) error {
+	tx, err := dm.connection.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
 
-	return fmt.Errorf("not implemented")
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.Exec(query, args...); err != nil {
+		return fmt.Errorf("failed to execute query: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
 }
 
-// TestConnection выполняет тестовый запрос к БД (опциональное задание)
-func TestConnection(db *sql.DB) error {
-	// TODO: Выполнить простой запрос для проверки работы БД
-	// Например: SELECT 1
-
-	return fmt.Errorf("not implemented")
+func (dm *DatabaseManager) TestResponsiveness() error {
+	row := dm.connection.QueryRow("SELECT 1")
+	var result int
+	if err := row.Scan(&result); err != nil {
+		return fmt.Errorf("database is not responsive: %w", err)
+	}
+	return nil
 }

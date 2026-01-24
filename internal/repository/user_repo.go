@@ -1,12 +1,16 @@
 package repository
 
 import (
-	"blog-api/internal/model"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"blog-api/internal/model"
+	"blog-api/pkg/database"
 )
 
 var (
@@ -14,123 +18,72 @@ var (
 	ErrUserExists   = errors.New("user already exists")
 )
 
-// UserRepo представляет репозиторий для работы с пользователями
 type UserRepo struct {
-	db *sql.DB
+	db *database.DatabaseManager
 }
 
-// NewUserRepo создает новый репозиторий пользователей
-func NewUserRepo(db *sql.DB) *UserRepo {
+
+func NewUserRepo(db *database.DatabaseManager) *UserRepo {
 	return &UserRepo{db: db}
 }
 
-// Create создает нового пользователя
 func (r *UserRepo) Create(ctx context.Context, user *model.User) error {
-	// TODO: Реализовать создание пользователя
-	// 1. Подготовить SQL запрос INSERT INTO users...
-	// 2. Установить created_at и updated_at = time.Now()
-	// 3. Выполнить запрос и получить ID созданной записи
-	// 4. Установить ID в структуру user
-	//
-	// HINT: Используйте QueryRowContext с RETURNING id для получения ID
-	// Пример запроса:
-	// INSERT INTO users (username, email, password, created_at, updated_at)
-	// VALUES ($1, $2, $3, $4, $5) RETURNING id
-
-	query := `
-		INSERT INTO users (username, email, password, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id
-	`
-
-	now := time.Now()
-	user.CreatedAt = now
-	user.UpdatedAt = now
-
-	// TODO: Выполнить запрос и обработать результат
-
-	return fmt.Errorf("not implemented")
+	result := r.db.ORM.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(user)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserExists
+	}
+	return nil
 }
 
-// GetByID получает пользователя по ID
 func (r *UserRepo) GetByID(ctx context.Context, id int) (*model.User, error) {
-	// TODO: Реализовать получение пользователя по ID
-	// 1. Подготовить SQL запрос SELECT ... FROM users WHERE id = $1
-	// 2. Выполнить запрос
-	// 3. Просканировать результат в структуру User
-	// 4. Обработать случай, когда пользователь не найден (sql.ErrNoRows)
-	//
-	// HINT: Используйте QueryRowContext и Scan
-
-	query := `
-		SELECT id, username, email, password, created_at, updated_at
-		FROM users
-		WHERE id = $1
-	`
-
 	var user model.User
-	// TODO: Выполнить запрос и просканировать результат
-	// Не забудьте обработать sql.ErrNoRows и вернуть ErrUserNotFound
-
-	_ = query // Удалите эту строку после реализации
-	return nil, fmt.Errorf("not implemented")
+	err := r.db.ORM.WithContext(ctx).First(&user, id).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrUserExists
+		}
+		return nil, fmt.Errorf("failed to get user by ID: %w", err)
+	}
+	return &user, nil
 }
 
-// GetByEmail получает пользователя по email
-func (r *UserRepo) GetByEmail(ctx context.Context, email string) (*model.User, error) {
-	// TODO: Реализовать получение пользователя по email
-	// Аналогично GetByID, но поиск по полю email
-
-	return nil, fmt.Errorf("not implemented")
+func (r *UserRepo) GetByField(ctx context.Context, field string, value any) (*model.User, error) {
+	var user model.User
+	err := r.db.ORM.WithContext(ctx).Where(fmt.Sprintf("%s = ?", field), value).First(&user).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by %s: %w", field, err)
+	}
+	return &user, nil
 }
 
-// GetByUsername получает пользователя по username
-func (r *UserRepo) GetByUsername(ctx context.Context, username string) (*model.User, error) {
-	// TODO: Реализовать получение пользователя по username
-	// Аналогично GetByID, но поиск по полю username
-
-	return nil, fmt.Errorf("not implemented")
+func (r *UserRepo) ExistsByField(ctx context.Context, field string, value any) (bool, error) {
+	var count int64
+	err := r.db.ORM.WithContext(ctx).Model(&model.User{}).Where(fmt.Sprintf("%s = ?", field), value).Count(&count).Error
+	return count > 0, err
 }
 
-// ExistsByEmail проверяет существование пользователя по email
-func (r *UserRepo) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	// TODO: Реализовать проверку существования пользователя
-	// HINT: Используйте SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)
-
-	query := `SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)`
-
-	var exists bool
-	// TODO: Выполнить запрос и просканировать результат в переменную exists
-
-	_ = query // Удалите эту строку после реализации
-	return false, fmt.Errorf("not implemented")
-}
-
-// ExistsByUsername проверяет существование пользователя по username
-func (r *UserRepo) ExistsByUsername(ctx context.Context, username string) (bool, error) {
-	// TODO: Реализовать проверку существования пользователя по username
-	// Аналогично ExistsByEmail
-
-	return false, fmt.Errorf("not implemented")
-}
-
-// Update обновляет данные пользователя
 func (r *UserRepo) Update(ctx context.Context, user *model.User) error {
-	// TODO: (Опционально) Реализовать обновление пользователя
-	// 1. Подготовить SQL запрос UPDATE users SET ... WHERE id = $X
-	// 2. Обновить updated_at = time.Now()
-	// 3. Выполнить запрос
-	// 4. Проверить, что запись была обновлена (RowsAffected)
-
-	return fmt.Errorf("not implemented")
+	user.UpdatedAt = time.Now()
+	err := r.db.ORM.WithContext(ctx).Save(user).Error
+	if err != nil {
+		return fmt.Errorf("failed to update user with ID %d: %w", user.ID, err)
+	}
+	return nil
 }
 
-// Delete удаляет пользователя
 func (r *UserRepo) Delete(ctx context.Context, id int) error {
-	// TODO: (Опционально) Реализовать удаление пользователя
-	// 1. Подготовить SQL запрос DELETE FROM users WHERE id = $1
-	// 2. Выполнить запрос
-	// 3. Проверить, что запись была удалена (RowsAffected)
-
-	return fmt.Errorf("not implemented")
+	result := r.db.ORM.WithContext(ctx).Delete(&model.User{}, id)
+	if result.Error != nil {
+		return fmt.Errorf("failed to delete user with ID %d: %w", id, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }

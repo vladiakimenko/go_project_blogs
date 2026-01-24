@@ -13,11 +13,11 @@ import (
 var (
 	ErrPasswordTooShort = errors.New("password is too short")
 	ErrPasswordTooWeak  = errors.New("password too weak")
-	ErrPasswordTooLong  = bcrypt.ErrPasswordTooLong
+	ErrPasswordTooLong  = bcrypt.ErrPasswordTooLong // 72 bytes bcrypt internal limit
 )
 
 // config
-type PasswordManagerConfig struct {
+type PasswordConfig struct {
 	MinLength         int
 	Cost              int
 	CaseShiftRequired bool
@@ -25,7 +25,7 @@ type PasswordManagerConfig struct {
 	SymbolsRequired   bool
 }
 
-func (c *PasswordManagerConfig) Setup() []settings.EnvLoadable {
+func (c *PasswordConfig) Setup() []settings.EnvLoadable {
 	return []settings.EnvLoadable{
 		settings.Item[int]{Name: "PASSWORD_MIN_LENGTH", Default: 6, Field: &c.MinLength},
 		settings.Item[int]{Name: "PASSWORD_COST", Default: bcrypt.DefaultCost, Field: &c.MinLength},
@@ -37,10 +37,10 @@ func (c *PasswordManagerConfig) Setup() []settings.EnvLoadable {
 
 // manager
 type PasswordManager struct {
-	config *PasswordManagerConfig
+	config *PasswordConfig
 }
 
-func NewPasswordManager(config *PasswordManagerConfig) *PasswordManager {
+func NewPasswordManager(config *PasswordConfig) *PasswordManager {
 	if config == nil {
 		panic("PasswordManager requires a non-nil config")
 	}

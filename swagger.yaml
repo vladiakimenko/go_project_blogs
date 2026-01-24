@@ -1,0 +1,490 @@
+openapi: 3.0.3
+info:
+  title: Blog API
+  description: API for blog posts, comments, and user authentication
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8080
+    description: Local server
+tags:
+  - name: Auth
+  - name: Posts
+  - name: Comments
+  - name: Users
+paths:
+  /api/health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+                example:
+                  status: ok
+                  service: blog-api
+
+  /api/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Invalid request
+        '500':
+          description: Server error
+
+  /api/login:
+    post:
+      tags: [Auth]
+      summary: Login user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLoginRequest'
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid credentials
+
+  /api/posts:
+    get:
+      tags: [Posts]
+      summary: Get all posts with pagination
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Paginated posts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponsePosts'
+
+    post:
+      tags: [Posts]
+      summary: Create a post
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostCreateRequest'
+      responses:
+        '201':
+          description: Post created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+
+  /api/posts/{postID}:
+    get:
+      tags: [Posts]
+      summary: Get post by ID
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Post found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          description: Invalid ID
+        '404':
+          description: Not found
+
+    put:
+      tags: [Posts]
+      summary: Update post
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostUpdateRequest'
+      responses:
+        '200':
+          description: Post updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Post'
+        '400':
+          description: Invalid request
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+    delete:
+      tags: [Posts]
+      summary: Delete post
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Post deleted
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+
+  /api/posts/{postID}/comments:
+    get:
+      tags: [Comments]
+      summary: Get comments for a post
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Paginated comments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedResponseComments'
+
+    post:
+      tags: [Comments]
+      summary: Create comment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreateRequest'
+      responses:
+        '201':
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+
+  /api/posts/{postID}/comments/{commentID}:
+    put:
+      tags: [Comments]
+      summary: Update comment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: commentID
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentUpdateRequest'
+      responses:
+        '200':
+          description: Comment updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+
+    delete:
+      tags: [Comments]
+      summary: Delete comment
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: postID
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: commentID
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Comment deleted
+
+  /api/users/{userID}:
+    get:
+      tags: [Users]
+      summary: Get user profile
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    UserCreateRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        password:
+          type: string
+      required:
+        - username
+        - email
+        - password
+
+    UserLoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        access_token_expires_at:
+          type: string
+          format: date-time
+        refresh_token:
+          type: string
+        refresh_token_expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: '#/components/schemas/User'
+
+    Post:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        content:
+          type: string
+        author_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PostCreateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+      required:
+        - title
+        - content
+
+    PostUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        content:
+          type: string
+        post_id:
+          type: integer
+        author_id:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CommentCreateRequest:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    CommentUpdateRequest:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    PaginationParams:
+      type: object
+      properties:
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    PaginatedResponsePosts:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Post'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
+
+    PaginatedResponseComments:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        limit:
+          type: integer
+        offset:
+          type: integer
+        total:
+          type: integer
