@@ -19,6 +19,7 @@ API блог-платформы. JWT аутентификация. Круд по
 ### Auth
 - `POST /api/register` — регистрация пользователя
 - `POST /api/login` — вход пользователя
+- `POST /api/refresh` — обновление токена
 
 ### Users
 - `GET /api/users/{userID}` — получение профиля пользователя (auth)
