@@ -89,17 +89,3 @@ func (m *JWTManager) RefreshToken(tokenString string) (string, time.Time, error)
 	}
 	return m.GenerateToken(claims.UserID)
 }
-
-// unsafe user_id lookup (never use in auth)
-func (m *JWTManager) GetUserIDFromToken(tokenString string) (int, error) {
-	token, _, err := (&jwt.Parser{}).ParseUnverified(tokenString, jwt.MapClaims{})
-	if err != nil {
-		return 0, err
-	}
-	claims := token.Claims.(jwt.MapClaims)
-	userID, ok := claims["user_id"].(float64)
-	if !ok {
-		return 0, fmt.Errorf("user_id not found or invalid type")
-	}
-	return int(userID), nil
-}

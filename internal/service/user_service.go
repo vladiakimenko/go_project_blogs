@@ -46,7 +46,7 @@ func (s *UserService) Register(
 		return nil, exception.DatabaseError(err.Error())
 	}
 	if exists {
-		return nil, exception.ConflictError("email already exists")
+		return nil, exception.ConflictError("user with such credentials already exists")
 	}
 	exists, err = s.userRepo.ExistsByField(ctx, "username", req.Username)
 	if err != nil {
@@ -54,7 +54,7 @@ func (s *UserService) Register(
 		return nil, exception.DatabaseError(err.Error())
 	}
 	if exists {
-		return nil, exception.ConflictError("username already exists")
+		return nil, exception.ConflictError("user with such credentials already exists")
 	}
 
 	if err := s.passwordManager.ValidatePasswordStrength(req.Password); err != nil {

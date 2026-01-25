@@ -31,7 +31,7 @@ func (c *PasswordConfig) Setup() []settings.EnvLoadable {
 		settings.Item[int]{Name: "PASSWORD_COST", Default: bcrypt.DefaultCost, Field: &c.MinLength},
 		settings.Item[bool]{Name: "PASSWORD_MUST_SHIFT_CASE", Default: true, Field: &c.CaseShiftRequired},
 		settings.Item[bool]{Name: "PASSWORD_MUST_HAVE_DIGITS", Default: true, Field: &c.DigitsRequired},
-		settings.Item[bool]{Name: "PASSWORD_MUST_HAVE_SYMBOLS", Default: true, Field: &c.DigitsRequired},
+		settings.Item[bool]{Name: "PASSWORD_MUST_HAVE_SYMBOLS", Default: true, Field: &c.SymbolsRequired},
 	}
 }
 

@@ -22,7 +22,6 @@ type UserRepo struct {
 	db *database.DatabaseManager
 }
 
-
 func NewUserRepo(db *database.DatabaseManager) *UserRepo {
 	return &UserRepo{db: db}
 }
@@ -43,7 +42,7 @@ func (r *UserRepo) GetByID(ctx context.Context, id int) (*model.User, error) {
 	err := r.db.ORM.WithContext(ctx).First(&user, id).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return nil, ErrUserExists
+			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to get user by ID: %w", err)
 	}

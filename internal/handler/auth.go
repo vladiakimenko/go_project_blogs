@@ -26,6 +26,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	body, ok := getParsedBody[model.UserCreateRequest](r)
 	if !ok {
 		exception.WriteApiError(w, exception.BadRequestError("Invalid request body"))
+		return
 	}
 
 	result, apiErr := h.userService.Register(r.Context(), body)
@@ -42,6 +43,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	body, ok := getParsedBody[model.UserLoginRequest](r)
 	if !ok {
 		exception.WriteApiError(w, exception.BadRequestError("Invalid request body"))
+		return
 	}
 
 	result, apiErr := h.userService.Login(r.Context(), body)

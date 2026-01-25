@@ -72,7 +72,7 @@ type UserLoginRequest struct {
 }
 
 type RefreshTokenRequest struct {
-	RefreshToken string `json:"refreshToken" validate:"required,uuid4"`
+	RefreshToken string `json:"refresh_token" validate:"required,uuid4"`
 }
 
 type PostCreateRequest struct {

@@ -109,6 +109,13 @@ func main() {
 		middleware.ModelBodyMiddleware[model.UserLoginRequest](userHandler.Login),
 	)
 
+	router.With(
+		middleware.RateLimiterMiddleware(authThrottler),
+	).Post(
+		"/api/refresh",
+		middleware.ModelBodyMiddleware[model.RefreshTokenRequest](userHandler.Refresh),
+	)
+
 	// public post endpoints
 	router.Get("/api/posts", postHandler.GetAll)
 	router.Get("/api/posts/{postID}", postHandler.GetByID)

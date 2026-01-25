@@ -47,7 +47,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/User'
+                $ref: '#/components/schemas/TokenResponse'
         '400':
           description: Invalid request
         '500':
@@ -74,6 +74,29 @@ paths:
           description: Invalid request
         '401':
           description: Invalid credentials
+
+  /api/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Tokens refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid or expired refresh token
+
 
   /api/posts:
     get:
@@ -366,6 +389,15 @@ components:
         - email
         - password
 
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+          format: uuid
+      required:
+        - refresh_token
+
     TokenResponse:
       type: object
       properties:
@@ -452,14 +484,6 @@ components:
           type: string
       required:
         - content
-
-    PaginationParams:
-      type: object
-      properties:
-        limit:
-          type: integer
-        offset:
-          type: integer
 
     PaginatedResponsePosts:
       type: object
